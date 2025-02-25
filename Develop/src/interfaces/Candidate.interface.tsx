@@ -9,3 +9,4 @@ export interface Candidate {
     company: string | null; // Some users may not have a company listed
   }
   
+export default Candidate

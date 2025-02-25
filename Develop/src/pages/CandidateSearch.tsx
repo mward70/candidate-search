@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Candidate } from "../interfaces/Candidate.interface";
 import { searchGithub } from "../api/API";
 
@@ -7,16 +7,35 @@ const CandidateSearch = () => {
   const navigate = useNavigate();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [loading, setLoading] = useState(true); // Added loading state
+  const [loading, setLoading] = useState(true);
+  const [noMoreCandidates, setNoMoreCandidates] = useState(false);
 
   const [savedCandidates, setSavedCandidates] = useState<Candidate[]>(() => {
     const saved = localStorage.getItem("savedCandidates");
     return saved ? JSON.parse(saved) : [];
   });
 
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("savedCandidates", JSON.stringify(savedCandidates));
   }, [savedCandidates]);
+
+  const mapUserData = (userData: any): Candidate => ({
+    name: userData.name || userData.login,
+    username: userData.login,
+    location: userData.location || "Unknown",
+    avatar: userData.avatar_url,
+    email: userData.email || "Not Available",
+    html_url: userData.html_url,
+    company: userData.company || "Unknown",
+  });
 
   // Fetch GitHub users
   useEffect(() => {
@@ -25,7 +44,6 @@ const CandidateSearch = () => {
       const users = await searchGithub();
 
       if (users.length > 0) {
-        // Fetch detailed user data for each candidate
         const detailedCandidates = await Promise.all(
           users.map(async (user: any) => {
             const response = await fetch(`https://api.github.com/users/${user.login}`, {
@@ -33,23 +51,17 @@ const CandidateSearch = () => {
                 Authorization: `Bearer ${import.meta.env.VITE_GITHUB_TOKEN}`,
               },
             });
-            const userData = await response.json();
-
-            return {
-              name: userData.name || userData.login,
-              username: userData.login,
-              location: userData.location || "Unknown",
-              avatar: userData.avatar_url,
-              email: userData.email || "Not Available",
-              html_url: userData.html_url,
-              company: userData.company || "Unknown",
-            };
+            return mapUserData(await response.json());
           })
         );
 
-        setCandidates(detailedCandidates);
+        if (isMounted.current) {
+          setCandidates(detailedCandidates);
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     fetchCandidates();
@@ -57,46 +69,30 @@ const CandidateSearch = () => {
 
   const saveCandidate = () => {
     if (currentIndex < candidates.length) {
-      const updatedSavedCandidates = [...savedCandidates, candidates[currentIndex]];
-      
-      setSavedCandidates(updatedSavedCandidates);
-      localStorage.setItem("savedCandidates", JSON.stringify(updatedSavedCandidates)); // ✅ Ensure it is stored
-      window.dispatchEvent(new Event("storage"));
+      if (!savedCandidates.some((c) => c.username === candidates[currentIndex].username)) {
+        setSavedCandidates((prev) => [...prev, candidates[currentIndex]]);
+      }
       nextCandidate();
     }
   };
 
-  const [noMoreCandidates, setNoMoreCandidates] = useState(false);
-
   const nextCandidate = () => {
     if (currentIndex < candidates.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+      setCurrentIndex((prevIndex) => prevIndex + 1);
     } else {
       setNoMoreCandidates(true);
       setTimeout(() => {
-        window.location.href = "/saved-candidates"; 
+        navigate("/saved-candidates");
       }, 500);
     }
   };
 
-  if (loading) {
-    return <h2>Loading candidates...</h2>;
-  }
+  if (loading) return <h2>Loading candidates...</h2>;
 
-  if (candidates.length === 0) {
-    return <h2>No more candidates available</h2>;
-  }
+  if (noMoreCandidates || candidates.length === 0) return <h2>No more candidates available</h2>;
 
-  const candidate = candidates.length > 0 ? candidates[currentIndex] : null;
+  const candidate = candidates[currentIndex];
 
-  if (loading) {
-    return <h2>Loading candidates...</h2>;
-  }
-  
-  if (!candidate) {
-    return <h2>No more candidates available</h2>;
-  }
-  
   return (
     <div>
       <h2>
